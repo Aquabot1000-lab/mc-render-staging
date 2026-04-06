@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mission Control</title>
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" sizes="192x192" href="favicon-192.png">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #0a0e1a 0%, #161b2e 100%);
+    color: #e4e4e7;
+    min-height: 100vh;
+    padding-bottom: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Header */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(13, 17, 23, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid #30363d;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .header h1 {
+    font-size: 20px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #6c5ce7 0%, #00b4d8 50%, #00b894 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: #8b949e;
+  }
+  .refresh-btn {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #e4e4e7;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .refresh-btn:hover {
+    background: #30363d;
+    border-color: #484f58;
+  }
+
+  /* Filter Bar */
+  .filter-bar {
+    position: sticky;
+    top: 57px;
+    z-index: 99;
+    background: rgba(13, 17, 23, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid #30363d;
+    padding: 12px 20px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .filter-pill {
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .filter-pill:hover {
+    background: rgba(48, 54, 61, 0.5);
+  }
+  .filter-pill.active {
+    background: #30363d;
+    color: #e4e4e7;
+    border-color: #484f58;
+  }
+  .filter-pill-all.active {
+    background: linear-gradient(135deg, #6c5ce7 0%, #00b4d8 50%, #00b894 100%);
+    border-color: transparent;
+    color: white;
+  }
+  .filter-pill-oa.active {
+    background: #6c5ce7;
+    border-color: #6c5ce7;
+    color: white;
+  }
+  .filter-pill-wa.active {
+    background: #00b4d8;
+    border-color: #00b4d8;
+    color: white;
+  }
+  .filter-pill-mp.active {
+    background: #00b894;
+    border-color: #00b894;
+    color: white;
+  }
+  .filter-pill-pbc.active {
+    background: #ff6b6b;
+    border-color: #ff6b6b;
+    color: white;
+  }
+
+  /* Stats Bar */
+  .stats-bar {
+    position: sticky;
+    top: 109px;
+    z-index: 98;
+    background: rgba(26, 31, 53, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid #30363d;
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+  }
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .stat-number {
+    font-size: 28px;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1;
+  }
+  .stat-label {
+    font-size: 11px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .company-dots {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-top: 4px;
+  }
+  .company-dot {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .company-dot-wa { background: rgba(0, 180, 216, 0.3); color: #67e8f9; }
+  .company-dot-oa { background: rgba(108, 92, 231, 0.3); color: #a78bfa; }
+  .company-dot-mp { background: rgba(0, 184, 148, 0.3); color: #6ee7b7; }
+  .company-dot-pbc { background: rgba(255, 107, 107, 0.3); color: #fca5a5; }
+
+  /* Container */
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+
+  /* Panel */
+  .panel {
+    background: rgba(22, 27, 34, 0.8);
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .panel.hidden {
+    display: none;
+  }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #30363d;
+  }
+  .panel-title {
+    font-size: 16px;
+    font-weight: 700;
+    flex: 1;
+  }
+  .panel-count {
+    background: #30363d;
+    color: #e4e4e7;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .panel-subtitle {
+    font-size: 12px;
+    color: #8b949e;
+    margin-left: auto;
+  }
+
+  /* Company tags */
+  .tag {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .tag-oa {
+    background: rgba(108, 92, 231, 0.2);
+    color: #a78bfa;
+    border: 1px solid #6c5ce7;
+  }
+  .tag-wa {
+    background: rgba(0, 180, 216, 0.2);
+    color: #67e8f9;
+    border: 1px solid #00b4d8;
+  }
+  .tag-mp {
+    background: rgba(0, 184, 148, 0.2);
+    color: #6ee7b7;
+    border: 1px solid #00b894;
+  }
+  .tag-pbc {
+    background: rgba(255, 107, 107, 0.2);
+    color: #fca5a5;
+    border: 1px solid #ff6b6b;
+  }
+
+  /* Category badges */
+  .category-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(48, 54, 61, 0.5);
+    color: #8b949e;
+  }
+
+  /* Tier badges */
+  .tier-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .tier-high {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border: 1px solid #f59e0b;
+  }
+  .tier-medium {
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+    border: 1px solid #3b82f6;
+  }
+  .tier-low {
+    background: rgba(107, 114, 128, 0.2);
+    color: #9ca3af;
+    border: 1px solid #6b7280;
+  }
+
+  /* Impact badges */
+  .impact-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .impact-leads {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    border: 1px solid #ef4444;
+  }
+  .impact-revenue {
+    background: rgba(249, 115, 22, 0.2);
+    color: #fdba74;
+    border: 1px solid #f97316;
+  }
+  .impact-data {
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+    border: 1px solid #3b82f6;
+  }
+  .impact-operations {
+    background: rgba(107, 114, 128, 0.2);
+    color: #9ca3af;
+    border: 1px solid #6b7280;
+  }
+
+  /* Severity badges */
+  .severity-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .severity-high {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    border: 1px solid #ef4444;
+  }
+  .severity-medium {
+    background: rgba(234, 179, 8, 0.2);
+    color: #fde047;
+    border: 1px solid #eab308;
+  }
+  .severity-low {
+    background: rgba(107, 114, 128, 0.2);
+    color: #9ca3af;
+    border: 1px solid #6b7280;
+  }
+  .pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ef4444;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.5;
+      transform: scale(1.2);
+    }
+  }
+
+  /* SLA Status Badges */
+  .time-left-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-left: auto;
+  }
+  .time-left-on_track {
+    background: #2a2f45;
+    color: #8b949e;
+  }
+  .time-left-warning {
+    background: #78350f;
+    color: #fbbf24;
+  }
+  .time-left-overdue {
+    background: #7f1d1d;
+    color: #fca5a5;
+    animation: pulseSLA 2s ease-in-out infinite;
+  }
+  .time-left-escalated {
+    background: #991b1b;
+    color: #ff6b6b;
+    animation: pulseSLA 1s ease-in-out infinite;
+  }
+  @keyframes pulseSLA {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+
+  /* SLA Label */
+  .sla-label {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    border: 1px solid #6b7280;
+    color: #9ca3af;
+    background: transparent;
+    margin-top: 4px;
+  }
+
+  /* Overdue task styling */
+  .task-card-overdue {
+    border-left: 3px solid #ef4444 !important;
+  }
+  .task-card-escalated {
+    border-left: 3px solid #ef4444 !important;
+    animation: pulseRedBorder 1s ease-in-out infinite;
+  }
+
+  /* Bot blocked styling */
+  .task-card-bot-blocked {
+    background: rgba(127, 29, 29, 0.2) !important;
+  }
+  .bot-blocked-banner {
+    font-size: 11px;
+    font-weight: 700;
+    color: #fca5a5;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+
+  /* Rolled forward badge */
+  .rolled-forward-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    background: rgba(107, 114, 128, 0.3);
+    color: #9ca3af;
+  }
+
+  /* Overdue stat pulsing */
+  .stat-overdue-pulse {
+    animation: pulseSLA 2s ease-in-out infinite;
+  }
+
+  /* Due date badges */
+  .due-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-left: auto;
+  }
+  .due-today {
+    background: rgba(245, 158, 11, 0.3);
+    color: #fbbf24;
+  }
+  .due-overdue {
+    background: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+  }
+  .due-future {
+    background: transparent;
+    border: 1px solid #6b7280;
+    color: #9ca3af;
+  }
+
+  /* Owner badges */
+  .owner-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .owner-bot {
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+    border: 1px solid #3b82f6;
+  }
+  .owner-tyler {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border: 1px solid #f59e0b;
+  }
+  .owner-human {
+    background: rgba(107, 114, 128, 0.2);
+    color: #9ca3af;
+    border: 1px solid #6b7280;
+  }
+
+  /* Task Cards */
+  .task-card {
+    background: rgba(13, 17, 23, 0.6);
+    border: 1px solid #30363d;
+    border-left: 3px solid #30363d;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 10px;
+    transition: all 0.2s;
+  }
+  .task-card.bot-card {
+    padding: 12px;
+  }
+  .task-card.clickable {
+    cursor: pointer;
+  }
+  .task-card.clickable:hover {
+    border-color: #484f58;
+    transform: translateX(2px);
+  }
+  .task-card-oa { border-left-color: #6c5ce7; }
+  .task-card-wa { border-left-color: #00b4d8; }
+  .task-card-mp { border-left-color: #00b894; }
+  .task-card-pbc { border-left-color: #ff6b6b; }
+
+  .task-card-tier-high {
+    border-left: 3px solid #f59e0b;
+    box-shadow: 0 0 15px rgba(245, 158, 11, 0.15);
+  }
+
+  .blocker-critical {
+    border: 1px solid #ef4444;
+    animation: pulseRedBorder 2s ease-in-out infinite;
+  }
+  @keyframes pulseRedBorder {
+    0%, 100% {
+      border-color: #ef4444;
+      box-shadow: 0 0 0 rgba(239, 68, 68, 0);
+    }
+    50% {
+      border-color: #dc2626;
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+    }
+  }
+
+  .task-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .task-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #e4e4e7;
+    flex: 1 1 100%;
+    margin-top: 4px;
+  }
+  .bot-card .task-title {
+    font-size: 13px;
+  }
+  .task-detail {
+    font-size: 13px;
+    color: #8b949e;
+    margin-bottom: 8px;
+    line-height: 1.5;
+  }
+  .bot-card .task-detail {
+    font-size: 12px;
+  }
+  .task-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #6e7681;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .task-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .task-time {
+    font-size: 11px;
+    color: #6e7681;
+  }
+  .task-value {
+    font-size: 13px;
+    font-weight: 700;
+    color: #00b894;
+  }
+  .task-arrow {
+    color: #6e7681;
+    font-size: 16px;
+    margin-left: auto;
+  }
+  .last-action {
+    font-size: 11px;
+    color: #8b949e;
+    font-style: italic;
+  }
+  .next-action {
+    font-size: 11px;
+    color: #6e7681;
+    font-style: italic;
+    margin-top: 4px;
+  }
+
+  /* Status Pills (one-click change) */
+  .status-pills {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .status-pill {
+    padding: 5px 10px;
+    border-radius: 14px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+    height: 28px;
+    display: flex;
+    align-items: center;
+  }
+  .status-pill:hover {
+    transform: scale(1.05);
+  }
+  .status-pill-pending {
+    background: transparent;
+    border-color: #6b7280;
+    color: #9ca3af;
+  }
+  .status-pill-pending.active {
+    background: rgba(107, 114, 128, 0.3);
+    border-color: #6b7280;
+    color: #e4e4e7;
+  }
+  .status-pill-in_progress {
+    background: transparent;
+    border-color: #3b82f6;
+    color: #93c5fd;
+  }
+  .status-pill-in_progress.active {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: #3b82f6;
+    color: #fff;
+  }
+  .status-pill-completed {
+    background: transparent;
+    border-color: #00b894;
+    color: #6ee7b7;
+  }
+  .status-pill-completed.active {
+    background: rgba(0, 184, 148, 0.3);
+    border-color: #00b894;
+    color: #fff;
+  }
+  .status-pill-blocked {
+    background: transparent;
+    border-color: #ef4444;
+    color: #fca5a5;
+  }
+  .status-pill-blocked.active {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: #ef4444;
+    color: #fff;
+  }
+
+  /* Buttons */
+  .btn-group {
+    display: flex;
+    gap: 8px;
+  }
+  .btn {
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    min-width: 70px;
+    min-height: 44px;
+  }
+  .btn-approve {
+    background: rgba(0, 184, 148, 0.2);
+    color: #6ee7b7;
+    border: 1px solid #00b894;
+  }
+  .btn-approve:hover {
+    background: rgba(0, 184, 148, 0.3);
+  }
+  .btn-reject {
+    background: rgba(107, 114, 128, 0.2);
+    color: #9ca3af;
+    border: 1px solid #6b7280;
+  }
+  .btn-reject:hover {
+    background: rgba(107, 114, 128, 0.3);
+  }
+  .btn-confirm {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    border: 1px solid #ef4444;
+  }
+  .btn-confirm:hover {
+    background: rgba(239, 68, 68, 0.3);
+  }
+  .btn-cancel {
+    background: transparent;
+    color: #8b949e;
+    border: 1px solid #30363d;
+  }
+  .btn-cancel:hover {
+    background: rgba(48, 54, 61, 0.3);
+  }
+
+  /* Reject reason input */
+  .reject-reason {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #30363d;
+    display: none;
+  }
+  .reject-reason.active {
+    display: block;
+  }
+  .reject-input {
+    width: 100%;
+    background: rgba(13, 17, 23, 0.8);
+    border: 1px solid #30363d;
+    color: #e4e4e7;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 8px;
+    font-family: inherit;
+  }
+  .reject-input:focus {
+    outline: none;
+    border-color: #484f58;
+  }
+
+  /* Toast notifications */
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: rgba(0, 184, 148, 0.95);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    animation: slideUp 0.3s ease forwards;
+  }
+  .toast.error {
+    background: rgba(239, 68, 68, 0.95);
+  }
+  @keyframes slideUp {
+    to {
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6e7681;
+    font-size: 13px;
+  }
+
+  /* Loading */
+  .loading {
+    text-align: center;
+    padding: 20px;
+    color: #6e7681;
+    font-size: 13px;
+  }
+
+  /* Category section */
+  .category-section {
+    margin-bottom: 20px;
+  }
+  .category-section:last-child {
+    margin-bottom: 0;
+  }
+  .category-header {
+    font-size: 14px;
+    font-weight: 700;
+    color: #e4e4e7;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #30363d;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Assignee header */
+  .assignee-header {
+    font-size: 13px;
+    font-weight: 700;
+    color: #e4e4e7;
+    margin-bottom: 10px;
+    margin-top: 16px;
+    padding-left: 8px;
+    border-left: 3px solid #6b7280;
+  }
+
+  /* Mobile optimizations */
+  @media (max-width: 640px) {
+    .container {
+      padding: 12px;
+    }
+    .panel {
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .header h1 {
+      font-size: 18px;
+    }
+    .filter-bar {
+      padding: 10px 12px;
+    }
+    .stats-bar {
+      padding: 12px 16px;
+      gap: 12px;
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .stat-item:nth-child(4),
+    .stat-item:nth-child(5) {
+      grid-column: span 1;
+    }
+    .stat-number {
+      font-size: 24px;
+    }
+    .stat-label {
+      font-size: 10px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Mission Control</h1>
+  <div class="header-right">
+    <span id="lastRefresh">—</span>
+    <button class="refresh-btn" onclick="loadDashboard()">Refresh</button>
+  </div>
+</div>
+
+<div class="filter-bar">
+  <button class="filter-pill filter-pill-all active" onclick="filterCompany('ALL')">ALL</button>
+  <button class="filter-pill filter-pill-wa" onclick="filterCompany('WA')">WA</button>
+  <button class="filter-pill filter-pill-oa" onclick="filterCompany('OA')">OA</button>
+  <button class="filter-pill filter-pill-mp" onclick="filterCompany('MP')">MP</button>
+  <button class="filter-pill filter-pill-pbc" onclick="filterCompany('PBC')">PBC</button>
+</div>
+
+<div class="stats-bar">
+  <div class="stat-item">
+    <div class="stat-number" id="stat-leads">0</div>
+    <div class="stat-label">Leads Today</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-number" id="stat-decisions">0</div>
+    <div class="stat-label">Decisions</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-number" id="stat-pipeline">$0</div>
+    <div class="stat-label">Pipeline</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-number" id="stat-overdue">0</div>
+    <div class="stat-label">Overdue</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-number" id="stat-blocked">0</div>
+    <div class="stat-label">Blocked</div>
+    <div class="company-dots" id="company-dots"></div>
+  </div>
+</div>
+
+<div class="container" id="main-container">
+  <div class="loading">Loading...</div>
+</div>
+
+<script>
+let refreshInterval;
+let currentFilter = 'ALL';
+let dashboardData = null;
+
+// Format time ago
+function timeAgo(timestamp) {
+  const seconds = Math.floor((new Date() - new Date(timestamp)) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'yesterday';
+  return `${days}d ago`;
+}
+
+// Format currency
+function formatCurrency(value) {
+  if (value >= 1000000) {
+    return `$${(value / 1000000).toFixed(1)}M`;
+  } else if (value >= 1000) {
+    return `$${(value / 1000).toFixed(0)}K`;
+  } else if (value > 0) {
+    return `$${value}`;
+  }
+  return '$0';
+}
+
+// Parse due date and determine status
+function parseDueDate(dueDate) {
+  if (!dueDate) return null;
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  let targetDate;
+  if (dueDate === 'today') {
+    targetDate = new Date(now);
+  } else if (dueDate === 'tomorrow') {
+    targetDate = new Date(now);
+    targetDate.setDate(targetDate.getDate() + 1);
+  } else {
+    targetDate = new Date(dueDate);
+  }
+
+  if (targetDate < now) return { text: 'OVERDUE', class: 'due-overdue' };
+  if (targetDate.getTime() === now.getTime()) return { text: 'TODAY', class: 'due-today' };
+
+  const diffDays = Math.floor((targetDate - now) / (1000 * 60 * 60 * 24));
+  return { text: `${diffDays}d`, class: 'due-future' };
+}
+
+// Open source URL
+function openSource(url) {
+  if (url) {
+    window.open(url, '_blank');
+  }
+}
+
+// Show reject reason input
+function showRejectReason(id, event) {
+  event.stopPropagation();
+  const reasonDiv = document.getElementById(`reject-reason-${id}`);
+  if (reasonDiv) {
+    reasonDiv.classList.add('active');
+  }
+}
+
+// Hide reject reason input
+function hideRejectReason(id, event) {
+  event.stopPropagation();
+  const reasonDiv = document.getElementById(`reject-reason-${id}`);
+  if (reasonDiv) {
+    reasonDiv.classList.remove('active');
+  }
+}
+
+// Show toast notification
+function showToast(message, isError = false) {
+  const toast = document.createElement('div');
+  toast.className = `toast ${isError ? 'error' : ''}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 3000);
+}
+
+// Handle approval action
+async function handleApproval(id, action, event) {
+  event.stopPropagation();
+  try {
+    let reason = null;
+    if (action === 'reject') {
+      const reasonInput = document.getElementById(`reject-input-${id}`);
+      reason = reasonInput?.value || 'No reason provided';
+    }
+
+    const res = await fetch(`/api/approval/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, reason })
+    });
+
+    if (res.ok) {
+      showToast(action === 'approve' ? 'Approved ✅' : 'Rejected');
+      loadDashboard();
+    } else {
+      showToast('Action failed', true);
+    }
+  } catch (err) {
+    console.error('Approval action failed:', err);
+    showToast('Action failed', true);
+  }
+}
+
+// Handle status change (one-click)
+async function changeStatus(id, newStatus, event) {
+  event.stopPropagation();
+  try {
+    const res = await fetch(`/api/task/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    });
+
+    if (res.ok) {
+      showToast(`Status → ${newStatus.replace('_', ' ')}`);
+      loadDashboard();
+    } else {
+      showToast('Status change failed', true);
+    }
+  } catch (err) {
+    console.error('Status change failed:', err);
+    showToast('Status change failed', true);
+  }
+}
+
+// Filter by company
+function filterCompany(company) {
+  currentFilter = company;
+
+  // Update filter pills
+  document.querySelectorAll('.filter-pill').forEach(pill => {
+    pill.classList.remove('active');
+  });
+  event.target.classList.add('active');
+
+  // Re-render dashboard with filter
+  renderDashboard();
+}
+
+// Get category icon
+function getCategoryIcon(category) {
+  const icons = {
+    revenue: '💰',
+    operations: '⚙️',
+    marketing: '📣',
+    product: '🔧'
+  };
+  return icons[category] || '📋';
+}
+
+// Render status pills (one-click change)
+function renderStatusPills(task) {
+  const statuses = ['pending', 'in_progress', 'completed', 'blocked'];
+  const labels = { pending: 'Pending', in_progress: 'In Progress', completed: 'Done', blocked: 'Blocked' };
+
+  let html = '<div class="status-pills">';
+  statuses.forEach(status => {
+    const isActive = task.status === status;
+    html += `
+      <div class="status-pill status-pill-${status} ${isActive ? 'active' : ''}"
+           onclick="changeStatus('${task.id}', '${status}', event)">
+        ${labels[status]}
+      </div>
+    `;
+  });
+  html += '</div>';
+  return html;
+}
+
+// Render task card
+function renderTaskCard(task, isBot = false, showStatusPills = true) {
+  const hasSource = !!task.sourceUrl;
+  const tier = task.tier || 'LOW';
+  const tierClass = tier === 'HIGH' ? 'task-card-tier-high' : '';
+  const impact = task.impact || 'OPERATIONS';
+  const isCritical = (impact === 'LEADS' || impact === 'REVENUE') && task.status === 'blocked';
+  const botClass = isBot ? 'bot-card' : '';
+
+  // SLA styling
+  const slaStatus = task.slaStatus || 'on_track';
+  const slaClass = (slaStatus === 'overdue' || slaStatus === 'escalated') ? 'task-card-overdue' : '';
+  const escalatedClass = slaStatus === 'escalated' ? 'task-card-escalated' : '';
+  const botBlockedClass = task.botBlocked ? 'task-card-bot-blocked' : '';
+
+  let html = `
+    <div class="task-card task-card-${task.company.toLowerCase()} ${tierClass} ${isCritical ? 'blocker-critical' : ''} ${slaClass} ${escalatedClass} ${botBlockedClass} ${hasSource ? 'clickable' : ''} ${botClass}"
+         ${hasSource ? `onclick="openSource('${task.sourceUrl}')"` : ''}>
+  `;
+
+  // Bot blocked banner
+  if (task.botBlocked) {
+    html += `<div class="bot-blocked-banner">⚠️ BOT BLOCKED — NEEDS TYLER</div>`;
+  }
+
+  html += `
+      <div class="task-header">
+        <span class="tag tag-${task.company.toLowerCase()}">${task.company}</span>
+        <span class="category-badge">${getCategoryIcon(task.category)} ${task.category.toUpperCase()}</span>
+  `;
+
+  if (task.status === 'needs_approval') {
+    html += `<span class="tier-badge tier-${tier.toLowerCase()}">${tier} IMPACT</span>`;
+  }
+
+  if (task.status === 'blocked' && task.severity) {
+    html += `
+      <span class="impact-badge impact-${impact.toLowerCase()}">${impact}</span>
+      <span class="severity-badge severity-${task.severity.toLowerCase()}">
+        ${task.severity === 'HIGH' ? '<span class="pulse-dot"></span>' : ''}
+        ${task.severity}
+      </span>
+    `;
+  }
+
+  // Due date badge
+  if (task.dueDate) {
+    const dueDateInfo = parseDueDate(task.dueDate);
+    if (dueDateInfo) {
+      html += `<span class="due-badge ${dueDateInfo.class}">${dueDateInfo.text}</span>`;
+    }
+  }
+
+  // Time left badge (SLA)
+  if (task.timeLeft) {
+    html += `<span class="time-left-badge time-left-${slaStatus}">${task.timeLeft}</span>`;
+  }
+
+  html += `</div>`;
+
+  // Rolled forward badge
+  if (task.rolledForward) {
+    html += `<span class="rolled-forward-badge">↩️</span>`;
+  }
+
+  // SLA label
+  if (task.sla) {
+    html += `<div><span class="sla-label">${task.sla}</span></div>`;
+  }
+
+  html += `<div class="task-title">${task.title}`;
+  if (hasSource) {
+    html += ` <span class="task-arrow">→</span>`;
+  }
+  html += `</div>`;
+
+  if (task.detail) {
+    html += `<div class="task-detail">${task.detail}</div>`;
+  }
+
+  html += `<div class="task-meta">`;
+
+  const ownerName = task.assignee || task.owner;
+  const ownerClass = ownerName === 'Bot' ? 'owner-bot' : (ownerName === 'Tyler' ? 'owner-tyler' : 'owner-human');
+  html += `<span class="owner-badge ${ownerClass}">${ownerName}</span>`;
+
+  if (task.trigger) {
+    html += `<span>• ${task.trigger}</span>`;
+  }
+
+  html += `</div>`;
+
+  // Bot-specific metadata
+  if (isBot && task.lastActionAt) {
+    html += `<div class="last-action">${timeAgo(task.lastActionAt)}</div>`;
+  }
+
+  if (task.nextAction) {
+    html += `<div class="next-action">Next: ${task.nextAction}</div>`;
+  }
+
+  if (task.estimatedValue) {
+    html += `<div class="task-value">${task.estimatedValue}</div>`;
+  }
+
+  html += `<div class="task-footer">`;
+  const timestamp = task.completedAt || task.createdAt;
+  html += `<span class="task-time">${timeAgo(timestamp)}</span>`;
+
+  if (task.status === 'needs_approval') {
+    html += `
+      <div class="btn-group">
+        <button class="btn btn-approve" onclick="handleApproval('${task.id}', 'approve', event)">
+          Approve
+        </button>
+        <button class="btn btn-reject" onclick="showRejectReason('${task.id}', event)">
+          Reject
+        </button>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+
+  // Status pills (except for needs_approval)
+  if (showStatusPills && task.status !== 'needs_approval') {
+    html += renderStatusPills(task);
+  }
+
+  if (task.status === 'needs_approval') {
+    html += `
+      <div class="reject-reason" id="reject-reason-${task.id}">
+        <input type="text" class="reject-input" id="reject-input-${task.id}"
+               placeholder="Why are you rejecting this?" onclick="event.stopPropagation()">
+        <div class="btn-group">
+          <button class="btn btn-confirm" onclick="handleApproval('${task.id}', 'reject', event)">
+            Confirm Reject
+          </button>
+          <button class="btn btn-cancel" onclick="hideRejectReason('${task.id}', event)">
+            Cancel
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+// Render dashboard (TODAY VIEW or COMPANY VIEW)
+function renderDashboard() {
+  if (!dashboardData) return;
+
+  const data = dashboardData;
+
+  // === STATS BAR ===
+  document.getElementById('stat-leads').textContent = data.stats?.leadsToday || 0;
+  document.getElementById('stat-decisions').textContent = data.stats?.decisionsPending || 0;
+  document.getElementById('stat-pipeline').textContent = formatCurrency(data.stats?.pipelineValue || 0);
+
+  const overdueCount = data.stats?.overdueCount || 0;
+  const overdueEl = document.getElementById('stat-overdue');
+  overdueEl.textContent = overdueCount;
+  if (overdueCount > 0) {
+    overdueEl.classList.add('stat-overdue-pulse');
+  } else {
+    overdueEl.classList.remove('stat-overdue-pulse');
+  }
+
+  document.getElementById('stat-blocked').textContent = data.stats?.blockedCount || 0;
+
+  // Company dots
+  const companyDots = document.getElementById('company-dots');
+  const tasksByCompany = data.stats?.tasksByCompany || {};
+  companyDots.innerHTML = `
+    <div class="company-dot company-dot-wa">WA: ${tasksByCompany.WA || 0}</div>
+    <div class="company-dot company-dot-oa">OA: ${tasksByCompany.OA || 0}</div>
+    <div class="company-dot company-dot-mp">MP: ${tasksByCompany.MP || 0}</div>
+    <div class="company-dot company-dot-pbc">PBC: ${tasksByCompany.PBC || 0}</div>
+  `;
+
+  const container = document.getElementById('main-container');
+
+  if (currentFilter === 'ALL') {
+    // === TODAY VIEW ===
+    renderTodayView(container, data);
+  } else {
+    // === COMPANY VIEW ===
+    renderCompanyView(container, data);
+  }
+}
+
+// Render TODAY VIEW
+function renderTodayView(container, data) {
+  let html = '';
+
+  // AGENTS STATUS PANEL (always at top)
+  html += `
+    <div class="panel" id="agents-panel">
+      <div class="panel-header">
+        <span>🤖</span>
+        <div class="panel-title">ACTIVE AGENTS</div>
+        <div class="panel-count" id="agents-count">...</div>
+      </div>
+      <div id="agents-list" style="display:grid;gap:8px;">
+        <div style="color:#666;padding:8px;">Loading agents...</div>
+      </div>
+    </div>
+  `;
+
+  // A. YOUR DECISIONS
+  const decisions = data.tylerTasks?.decisions || [];
+  if (decisions.length > 0) {
+    html += `
+      <div class="panel">
+        <div class="panel-header">
+          <span>🎯</span>
+          <div class="panel-title">YOUR DECISIONS</div>
+          <div class="panel-count">${decisions.length}</div>
+        </div>
+        ${decisions.map(t => renderTaskCard(t, false, false)).join('')}
+      </div>
+    `;
+  }
+
+  // B. YOUR TASKS
+  const myTasks = data.tylerTasks?.myTasks || [];
+  if (myTasks.length > 0) {
+    html += `
+      <div class="panel">
+        <div class="panel-header">
+          <span>📋</span>
+          <div class="panel-title">YOUR TASKS</div>
+          <div class="panel-count">${myTasks.length}</div>
+        </div>
+        ${myTasks.map(t => renderTaskCard(t, false, true)).join('')}
+      </div>
+    `;
+  }
+
+  // C. BOT STATUS
+  const botActive = data.botTasks?.active || [];
+  const botWaiting = data.botTasks?.waiting || [];
+  const totalBots = botActive.length + botWaiting.length;
+  if (totalBots > 0) {
+    html += `
+      <div class="panel">
+        <div class="panel-header">
+          <span>🤖</span>
+          <div class="panel-title">BOT STATUS</div>
+          <div class="panel-subtitle">${botActive.length} active · ${botWaiting.length} waiting</div>
+        </div>
+        ${[...botActive, ...botWaiting].map(t => renderTaskCard(t, true, false)).join('')}
+      </div>
+    `;
+  }
+
+  // D. TEAM
+  const teamTasks = data.teamTasks || [];
+  if (teamTasks.length > 0) {
+    html += `
+      <div class="panel">
+        <div class="panel-header">
+          <span>👥</span>
+          <div class="panel-title">TEAM</div>
+          <div class="panel-count">${teamTasks.length}</div>
+        </div>
+    `;
+
+    // Group by assignee
+    const byAssignee = {};
+    teamTasks.forEach(task => {
+      const name = task.assignee || task.owner;
+      if (!byAssignee[name]) byAssignee[name] = [];
+      byAssignee[name].push(task);
+    });
+
+    Object.keys(byAssignee).forEach(name => {
+      html += `<div class="assignee-header">${name}</div>`;
+      html += byAssignee[name].map(t => renderTaskCard(t, false, true)).join('');
+    });
+
+    html += `</div>`;
+  }
+
+  // E. BLOCKERS
+  const blockers = data.blockers || [];
+  if (blockers.length > 0) {
+    html += `
+      <div class="panel">
+        <div class="panel-header">
+          <span>🚨</span>
+          <div class="panel-title">BLOCKERS</div>
+          <div class="panel-count">${blockers.length}</div>
+        </div>
+        ${blockers.map(t => renderTaskCard(t, false, false)).join('')}
+      </div>
+    `;
+  }
+
+  // F. COMPLETED
+  const completed = data.completed || [];
+  if (completed.length > 0) {
+    html += `
+      <div class="panel">
+        <div class="panel-header">
+          <span>✅</span>
+          <div class="panel-title">COMPLETED TODAY</div>
+          <div class="panel-count">${completed.length}</div>
+        </div>
+        ${completed.map(t => renderTaskCard(t, false, false)).join('')}
+      </div>
+    `;
+  }
+
+  if (!html) {
+    html = '<div class="empty">No tasks to display</div>';
+  }
+
+  container.innerHTML = html;
+}
+
+// Render COMPANY VIEW
+function renderCompanyView(container, data) {
+  const company = currentFilter;
+  const companyData = data.byCompany?.[company];
+
+  if (!companyData) {
+    container.innerHTML = '<div class="empty">No data for this company</div>';
+    return;
+  }
+
+  let html = '<div class="panel">';
+
+  const categories = [
+    { key: 'revenue', icon: '💰', label: 'REVENUE' },
+    { key: 'operations', icon: '⚙️', label: 'OPERATIONS' },
+    { key: 'marketing', icon: '📣', label: 'MARKETING' },
+    { key: 'product', icon: '🔧', label: 'PRODUCT/ADMIN' }
+  ];
+
+  let hasContent = false;
+
+  categories.forEach(cat => {
+    const tasks = companyData[cat.key] || [];
+    if (tasks.length > 0) {
+      hasContent = true;
+      html += `
+        <div class="category-section">
+          <div class="category-header">
+            ${cat.icon} ${cat.label}
+          </div>
+          ${tasks.map(t => renderTaskCard(t, false, true)).join('')}
+        </div>
+      `;
+    }
+  });
+
+  html += '</div>';
+
+  if (!hasContent) {
+    container.innerHTML = '<div class="empty">No tasks for this company</div>';
+  } else {
+    container.innerHTML = html;
+  }
+}
+
+// Load dashboard data
+async function loadDashboard() {
+  try {
+    const res = await fetch('/api/dashboard');
+    const data = await res.json();
+
+    dashboardData = data;
+
+    // Update last refresh time
+    const now = new Date();
+    document.getElementById('lastRefresh').textContent = now.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    // Render dashboard with current filter
+    renderDashboard();
+
+  } catch (err) {
+    console.error('Failed to load dashboard:', err);
+    document.getElementById('main-container').innerHTML = '<div class="empty">Failed to load dashboard</div>';
+  }
+}
+
+// Initial load
+loadDashboard();
+
+// Load and render agents
+async function loadAgents() {
+  try {
+    const res = await fetch('/api/agents');
+    const agents = await res.json();
+    const container = document.getElementById('agents-list');
+    const countEl = document.getElementById('agents-count');
+    if (!container) return;
+    
+    countEl.textContent = agents.length;
+    
+    if (agents.length === 0) {
+      container.innerHTML = '<div style="color:#666;padding:8px;">No agents registered</div>';
+      return;
+    }
+    
+    container.innerHTML = agents.map(a => {
+      const statusColor = a.status === 'active' ? '#00C853' : a.status === 'idle' ? '#FF9800' : '#F44336';
+      const statusIcon = a.status === 'active' ? '🟢' : a.status === 'idle' ? '🟡' : '🔴';
+      const typeLabel = a.type === 'background' ? '🔄 BG' : '🎯 ACTIVE';
+      const lastSeen = a.lastSeen ? new Date(a.lastSeen).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—';
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#1a1a2e;border-radius:8px;border-left:3px solid ${statusColor};">
+          <div style="flex:1;">
+            <div style="color:#e0e0e0;font-weight:600;font-size:13px;">${statusIcon} ${a.name}</div>
+            <div style="color:#888;font-size:11px;margin-top:2px;">${a.task || 'No current task'}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="color:${statusColor};font-size:10px;font-weight:600;text-transform:uppercase;">${typeLabel}</div>
+            <div style="color:#555;font-size:10px;margin-top:2px;">${lastSeen}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load agents:', err);
+  }
+}
+
+// Load agents on dashboard load and refresh
+loadAgents();
+setInterval(loadAgents, 30000);
+
+// Auto-refresh every 30 seconds
+refreshInterval = setInterval(loadDashboard, 30000);
+</script>
+
+</body>
+</html>
