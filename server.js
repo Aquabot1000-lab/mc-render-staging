@@ -689,9 +689,10 @@ app.post('/api/tasks', async (req, res) => {
     };
 
     const createdTask = await db.createTask(task);
+    console.log(`[MC] ACTION=create_task | company=${company} | task=${taskId} | title=${title} | priority=${priority || 'medium'} | ts=${now}`);
     res.json(createdTask);
   } catch (err) {
-    console.error('Task creation error:', err);
+    console.error(`[MC] FAIL=create_task | error=${err.message} | ts=${new Date().toISOString()}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -899,9 +900,10 @@ app.post('/api/tasks/:id/complete', async (req, res) => {
     }
 
     const updatedTask = await db.updateTask(id, updates);
+    console.log(`[MC] ACTION=complete_task | task=${id} | company=${task.company} | title=${task.title} | ts=${now}`);
     res.json({ success: true, task: updatedTask });
   } catch (err) {
-    console.error('Task complete error:', err);
+    console.error(`[MC] FAIL=complete_task | task=${req.params.id} | error=${err.message} | ts=${new Date().toISOString()}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -959,9 +961,10 @@ app.patch('/api/tasks/:id/step', async (req, res) => {
     }
 
     const updatedTask = await db.updateTask(id, updates);
+    console.log(`[MC] ACTION=update_step | task=${id} | step=${currentStep || '?'} | company=${task.company} | ts=${now}`);
     res.json({ success: true, task: updatedTask });
   } catch (err) {
-    console.error('Task step update error:', err);
+    console.error(`[MC] FAIL=update_step | task=${req.params.id} | error=${err.message} | ts=${new Date().toISOString()}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -976,9 +979,10 @@ app.delete('/api/agents/:id', async (req, res) => {
       return res.status(404).json({ error: 'Agent not found' });
     }
 
+    console.log(`[MC] ACTION=delete_agent | agent=${id} | name=${deleted.name || '?'} | ts=${new Date().toISOString()}`);
     res.json({ success: true, agent: deleted });
   } catch (err) {
-    console.error('Agent delete error:', err);
+    console.error(`[MC] FAIL=delete_agent | agent=${req.params.id} | error=${err.message} | ts=${new Date().toISOString()}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -993,9 +997,10 @@ app.delete('/api/tasks/:id', async (req, res) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
+    console.log(`[MC] ACTION=delete_task | task=${id} | company=${deleted.company || '?'} | title=${deleted.title || '?'} | ts=${new Date().toISOString()}`);
     res.json({ success: true, task: deleted });
   } catch (err) {
-    console.error('Task delete error:', err);
+    console.error(`[MC] FAIL=delete_task | task=${req.params.id} | error=${err.message} | ts=${new Date().toISOString()}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1063,9 +1068,10 @@ app.post('/api/webhook/wa-lead', async (req, res) => {
     };
 
     const createdTask = await db.createTask(task);
+    console.log(`[MC] ACTION=webhook_wa_lead | task=${task.id} | name=${name} | salesperson=${salesperson || 'Unassigned'} | source=${source || 'Unknown'} | ts=${now}`);
     res.json({ created: true, task: createdTask });
   } catch (err) {
-    console.error('WA lead webhook error:', err);
+    console.error(`[MC] FAIL=webhook_wa_lead | error=${err.message} | ts=${new Date().toISOString()}`);
     res.status(500).json({ error: err.message });
   }
 });
