@@ -2,6 +2,7 @@ const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs').promises;
 const path = require('path');
+const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3003;
@@ -19,42 +20,22 @@ app.use((req, res, next) => {
   next();
 });
 
-// Data directory
+// Data directory (for creators and activityLog only)
 const DATA_DIR = path.join(__dirname, 'data');
-const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
 const ACTIVITY_FILE = path.join(DATA_DIR, 'activity.json');
 const CREATORS_FILE = path.join(DATA_DIR, 'creators.json');
-const AGENTS_FILE = path.join(DATA_DIR, 'agents.json');
 
-// In-memory storage
-let tasks = [];
+// In-memory storage (creators and activityLog only - tasks/agents now in Supabase)
 let activityLog = [];
 let creators = [];
-let agentRegistry = [
-  { name: 'OA Analysis Agent', status: 'active', task: 'Incoming lead analysis + 5-comp rule', type: 'background', lastSeen: new Date().toISOString() },
-  { name: 'OA Ops Agent', status: 'active', task: 'Lead contact within 60s', type: 'background', lastSeen: new Date().toISOString() },
-  { name: 'WA CRM Agent', status: 'active', task: 'WortheyFlow health monitoring', type: 'background', lastSeen: new Date().toISOString() },
-  { name: 'MilePilot Product Agent', status: 'active', task: 'Auto-detection + swipe UX', type: 'active', lastSeen: new Date().toISOString() },
-  { name: 'Platform Agent', status: 'active', task: 'Mission Control + gateway', type: 'active', lastSeen: new Date().toISOString() },
-];
 
 // Track server uptime
 const startTime = Date.now();
 
-// Initialize data directory and load persisted data
+// Initialize data directory and load persisted data (creators and activityLog only)
 async function initDataStore() {
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
-
-    // Load tasks
-    try {
-      const tasksData = await fs.readFile(TASKS_FILE, 'utf8');
-      tasks = JSON.parse(tasksData);
-      console.log(`📋 Loaded ${tasks.length} tasks`);
-    } catch (err) {
-      if (err.code !== 'ENOENT') throw err;
-      tasks = [];
-    }
 
     // Load activity log (legacy compat)
     try {
@@ -76,30 +57,21 @@ async function initDataStore() {
       creators = [];
     }
 
-    // Load agent registry
-    try {
-      const agentsData = await fs.readFile(AGENTS_FILE, 'utf8');
-      const loadedAgents = JSON.parse(agentsData);
-      if (loadedAgents.length > 0) {
-        agentRegistry = loadedAgents;
-        console.log(`🤖 Loaded ${agentRegistry.length} agents`);
-      }
-    } catch (err) {
-      if (err.code !== 'ENOENT') throw err;
-      // Keep default agents
-    }
+    // Tasks and agents are now in Supabase
+    const taskCount = await db.getTaskCount();
+    const agents = await db.getAllAgents();
+    console.log(`📋 Supabase tasks: ${taskCount}`);
+    console.log(`🤖 Supabase agents: ${agents.length}`);
   } catch (err) {
     console.error('Failed to initialize data store:', err);
   }
 }
 
-// Persist data to disk
+// Persist data to disk (creators and activityLog only - tasks/agents auto-persist in Supabase)
 async function persistData() {
   try {
-    await fs.writeFile(TASKS_FILE, JSON.stringify(tasks, null, 2));
     await fs.writeFile(ACTIVITY_FILE, JSON.stringify(activityLog, null, 2));
     await fs.writeFile(CREATORS_FILE, JSON.stringify(creators, null, 2));
-    await fs.writeFile(AGENTS_FILE, JSON.stringify(agentRegistry, null, 2));
   } catch (err) {
     console.error('Failed to persist data:', err);
   }
@@ -290,11 +262,11 @@ function generateId() {
 // ========== CREATOR PIPELINE FUNCTIONS ==========
 
 // Auto follow-up engine for creators
-function runCreatorFollowUp() {
+async function runCreatorFollowUp() {
   const now = new Date();
   let changesCount = 0;
 
-  creators.forEach(creator => {
+  for (const creator of creators) {
     const lastContact = new Date(creator.lastContactDate);
     const hoursSinceContact = (now - lastContact) / (60 * 60 * 1000);
     const daysSinceContact = hoursSinceContact / 24;
@@ -372,9 +344,9 @@ function runCreatorFollowUp() {
         originalPriority: null
       };
 
-      tasks.unshift(task);
+      const createdTask = await db.createTask(task);
       creator.taskCreated = true;
-      creator.taskId = task.id;
+      creator.taskId = createdTask.id;
       creator.updatedAt = nowISO;
       changesCount++;
     }
@@ -420,16 +392,16 @@ function runCreatorFollowUp() {
         originalPriority: null
       };
 
-      tasks.unshift(task);
+      const createdTask = await db.createTask(task);
       creator.onboardingTaskCreated = true;
-      creator.onboardingTaskId = task.id;
+      creator.onboardingTaskId = createdTask.id;
       creator.updatedAt = nowISO;
       changesCount++;
     }
 
     // Check if onboarding task completed → move to active
     if (creator.stage === 'committed' && creator.onboardingTaskId) {
-      const onboardingTask = tasks.find(t => t.id === creator.onboardingTaskId);
+      const onboardingTask = await db.getTaskById(creator.onboardingTaskId);
       if (onboardingTask && onboardingTask.status === 'completed') {
         creator.stage = 'active';
         creator.nextAction = 'Creator is active';
@@ -437,7 +409,7 @@ function runCreatorFollowUp() {
         changesCount++;
       }
     }
-  });
+  }
 
   return changesCount;
 }
@@ -559,52 +531,60 @@ function formatTimeLeft(slaDeadline, slaStatus) {
 }
 
 // Run SLA enforcement on all active tasks
-function runSlaEnforcement() {
+async function runSlaEnforcement() {
   const now = new Date().toISOString();
   let changesCount = 0;
 
-  tasks.forEach(task => {
+  const tasks = await db.getAllTasks({ status: 'pending,in_progress,assigned,blocked' });
+
+  for (const task of tasks) {
     // Only enforce on active tasks
     if (!['pending', 'in_progress', 'assigned', 'blocked'].includes(task.status)) {
-      return;
+      continue;
     }
 
     // Skip if no SLA deadline
     if (!task.slaDeadline) {
-      return;
+      continue;
     }
 
     // Calculate current SLA status
     const newStatus = calculateSlaStatus(task.slaDeadline, task.createdAt, task.sla);
     const oldStatus = task.slaStatus;
 
-    task.slaStatus = newStatus;
-    task.timeLeft = formatTimeLeft(task.slaDeadline, newStatus);
+    const updates = {
+      slaStatus: newStatus,
+      timeLeft: formatTimeLeft(task.slaDeadline, newStatus)
+    };
 
     // Auto-block if overdue (but not already blocked)
     if (newStatus === 'overdue' && !task.slaOverdueAt) {
-      task.slaOverdueAt = now;
+      updates.slaOverdueAt = now;
 
       // Auto-change to blocked if pending/in_progress/assigned
       if (['pending', 'in_progress', 'assigned'].includes(task.status)) {
-        task.status = 'blocked';
-        task.detail = task.detail ? `${task.detail}\n\n[SLA OVERDUE — auto-blocked]` : '[SLA OVERDUE — auto-blocked]';
+        updates.status = 'blocked';
+        updates.detail = task.detail ? `${task.detail}\n\n[SLA OVERDUE — auto-blocked]` : '[SLA OVERDUE — auto-blocked]';
         changesCount++;
       }
     }
 
     // Escalate if past 2x duration
     if (newStatus === 'escalated' && !task.slaEscalatedAt) {
-      task.slaEscalatedAt = now;
+      updates.slaEscalatedAt = now;
 
       // If Bot-owned, mark as botBlocked
       if (task.owner === 'Bot') {
-        task.botBlocked = true;
-        task.title = task.title.startsWith('⚠️') ? task.title : `⚠️ BOT BLOCKED: ${task.title}`;
+        updates.botBlocked = true;
+        updates.title = task.title.startsWith('⚠️') ? task.title : `⚠️ BOT BLOCKED: ${task.title}`;
         changesCount++;
       }
     }
-  });
+
+    if (Object.keys(updates).length > 2) { // More than just slaStatus and timeLeft
+      await db.updateTask(task.id, updates);
+    }
+  }
 
   return changesCount;
 }
@@ -708,15 +688,8 @@ app.post('/api/tasks', async (req, res) => {
       originalPriority: null
     };
 
-    tasks.unshift(task);
-
-    // Keep only last 1000 tasks
-    if (tasks.length > 1000) {
-      tasks = tasks.slice(0, 1000);
-    }
-
-    await persistData();
-    res.json(task);
+    const createdTask = await db.createTask(task);
+    res.json(createdTask);
   } catch (err) {
     console.error('Task creation error:', err);
     res.status(500).json({ error: err.message });
@@ -733,10 +706,7 @@ app.post('/api/tasks/claim', async (req, res) => {
     }
 
     // Check if agent already has a task in progress
-    const agentInProgress = tasks.find(t =>
-      t.agent === agentName &&
-      t.status === 'in_progress'
-    );
+    const agentInProgress = await db.findTaskByAgent(agentName);
 
     if (agentInProgress) {
       return res.status(409).json({
@@ -746,10 +716,7 @@ app.post('/api/tasks/claim', async (req, res) => {
     }
 
     // Find first queued task matching company (if specified)
-    const queuedTask = tasks.find(t =>
-      t.status === 'queued' &&
-      (!company || t.company === company)
-    );
+    const queuedTask = await db.findQueuedTask(company);
 
     if (!queuedTask) {
       return res.json({ task: null, message: 'Queue empty' });
@@ -757,14 +724,14 @@ app.post('/api/tasks/claim', async (req, res) => {
 
     // Claim the task
     const now = new Date().toISOString();
-    queuedTask.status = 'in_progress';
-    queuedTask.agent = agentName;
-    queuedTask.startedAt = now;
-    queuedTask.lastActionAt = now;
-    queuedTask.updatedAt = now;
+    const updatedTask = await db.updateTask(queuedTask.id, {
+      status: 'in_progress',
+      agent: agentName,
+      startedAt: now,
+      lastActionAt: now
+    });
 
-    await persistData();
-    res.json({ task: queuedTask });
+    res.json({ task: updatedTask });
   } catch (err) {
     console.error('Task claim error:', err);
     res.status(500).json({ error: err.message });
@@ -783,10 +750,10 @@ app.post('/api/agents', async (req, res) => {
     const now = new Date().toISOString();
 
     // Find existing agent
-    const existingIdx = agentRegistry.findIndex(a => a.name === name);
+    const existing = await db.getAgentByName(name);
 
     const agent = {
-      id: existingIdx >= 0 ? agentRegistry[existingIdx].id : generateId(),
+      id: existing ? existing.id : generateId(),
       name,
       company: company || null,
       type: type || 'background',
@@ -798,18 +765,12 @@ app.post('/api/agents', async (req, res) => {
       lastAction: null,
       lastHeartbeat: now,
       status: 'idle',
-      createdAt: existingIdx >= 0 ? agentRegistry[existingIdx].createdAt : now,
+      createdAt: existing ? existing.createdAt : now,
       updatedAt: now
     };
 
-    if (existingIdx >= 0) {
-      agentRegistry[existingIdx] = agent;
-    } else {
-      agentRegistry.push(agent);
-    }
-
-    await persistData();
-    res.json(agent);
+    const upsertedAgent = await db.upsertAgent(agent);
+    res.json(upsertedAgent);
   } catch (err) {
     console.error('Agent registration error:', err);
     res.status(500).json({ error: err.message });
@@ -822,26 +783,27 @@ app.post('/api/agents/:name/heartbeat', async (req, res) => {
     const { name } = req.params;
     const { currentTaskId, lastAction, error } = req.body;
 
-    const agent = agentRegistry.find(a => a.name === name);
+    const agent = await db.getAgentByName(name);
     if (!agent) {
       return res.status(404).json({ error: 'Agent not found' });
     }
 
     const now = new Date().toISOString();
 
-    agent.lastHeartbeat = now;
-    agent.updatedAt = now;
-    agent.lastAction = lastAction || agent.lastAction;
-    agent.error = error || null;
+    const updates = {
+      lastHeartbeat: now,
+      lastAction: lastAction || agent.lastAction,
+      error: error || null
+    };
 
     if (currentTaskId) {
-      agent.currentTaskId = currentTaskId;
-      agent.status = 'working';
+      updates.currentTaskId = currentTaskId;
+      updates.status = 'working';
 
       // Find the task
-      const task = tasks.find(t => t.id === currentTaskId);
+      const task = await db.getTaskById(currentTaskId);
       if (task) {
-        agent.currentTask = {
+        updates.currentTask = {
           id: task.id,
           title: task.title,
           company: task.company,
@@ -849,12 +811,12 @@ app.post('/api/agents/:name/heartbeat', async (req, res) => {
         };
       }
     } else {
-      agent.currentTaskId = null;
-      agent.currentTask = null;
-      agent.status = 'idle';
+      updates.currentTaskId = null;
+      updates.currentTask = null;
+      updates.status = 'idle';
     }
 
-    await persistData();
+    await db.updateAgent(name, updates);
     res.json({ ok: true });
   } catch (err) {
     console.error('Agent heartbeat error:', err);
@@ -863,11 +825,12 @@ app.post('/api/agents/:name/heartbeat', async (req, res) => {
 });
 
 // GET /api/agents/health — Agent health summary
-app.get('/api/agents/health', (req, res) => {
+app.get('/api/agents/health', async (req, res) => {
   try {
     const now = Date.now();
+    const agents = await db.getAllAgents();
 
-    const healthSummary = agentRegistry.map(agent => {
+    const healthSummary = agents.map(agent => {
       const lastHeartbeat = agent.lastHeartbeat ? new Date(agent.lastHeartbeat).getTime() : 0;
       const staleSec = Math.floor((now - lastHeartbeat) / 1000);
       const stale = staleSec > 120; // Stale if >120s since heartbeat
@@ -892,21 +855,21 @@ app.post('/api/tasks/:id/start', async (req, res) => {
     const { id } = req.params;
     const { agent, currentStep } = req.body;
 
-    const task = tasks.find(t => t.id === id);
+    const task = await db.getTaskById(id);
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
     const now = new Date().toISOString();
-    task.status = 'in_progress';
-    task.startedAt = now;
-    task.agent = agent || task.agent;
-    task.currentStep = currentStep || null;
-    task.lastActionAt = now;
-    task.updatedAt = now;
+    const updatedTask = await db.updateTask(id, {
+      status: 'in_progress',
+      startedAt: now,
+      agent: agent || task.agent,
+      currentStep: currentStep || null,
+      lastActionAt: now
+    });
 
-    await persistData();
-    res.json({ success: true, task });
+    res.json({ success: true, task: updatedTask });
   } catch (err) {
     console.error('Task start error:', err);
     res.status(500).json({ error: err.message });
@@ -919,23 +882,24 @@ app.post('/api/tasks/:id/complete', async (req, res) => {
     const { id } = req.params;
     const { detail } = req.body;
 
-    const task = tasks.find(t => t.id === id);
+    const task = await db.getTaskById(id);
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
     const now = new Date().toISOString();
-    task.status = 'completed';
-    task.completedAt = now;
-    task.lastActionAt = now;
-    task.updatedAt = now;
+    const updates = {
+      status: 'completed',
+      completedAt: now,
+      lastActionAt: now
+    };
 
     if (detail) {
-      task.detail = task.detail ? `${task.detail}\n\n[COMPLETED] ${detail}` : detail;
+      updates.detail = task.detail ? `${task.detail}\n\n[COMPLETED] ${detail}` : detail;
     }
 
-    await persistData();
-    res.json({ success: true, task });
+    const updatedTask = await db.updateTask(id, updates);
+    res.json({ success: true, task: updatedTask });
   } catch (err) {
     console.error('Task complete error:', err);
     res.status(500).json({ error: err.message });
@@ -948,23 +912,24 @@ app.post('/api/tasks/:id/fail', async (req, res) => {
     const { id } = req.params;
     const { error, blocked } = req.body;
 
-    const task = tasks.find(t => t.id === id);
+    const task = await db.getTaskById(id);
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
     const now = new Date().toISOString();
-    task.status = blocked ? 'blocked' : 'failed';
-    task.error = error || 'Task failed';
-    task.lastActionAt = now;
-    task.updatedAt = now;
+    const updates = {
+      status: blocked ? 'blocked' : 'failed',
+      error: error || 'Task failed',
+      lastActionAt: now
+    };
 
     if (error) {
-      task.detail = task.detail ? `${task.detail}\n\n[ERROR] ${error}` : `[ERROR] ${error}`;
+      updates.detail = task.detail ? `${task.detail}\n\n[ERROR] ${error}` : `[ERROR] ${error}`;
     }
 
-    await persistData();
-    res.json({ success: true, task });
+    const updatedTask = await db.updateTask(id, updates);
+    res.json({ success: true, task: updatedTask });
   } catch (err) {
     console.error('Task fail error:', err);
     res.status(500).json({ error: err.message });
@@ -977,26 +942,24 @@ app.patch('/api/tasks/:id/step', async (req, res) => {
     const { id } = req.params;
     const { currentStep, nextAction } = req.body;
 
-    const task = tasks.find(t => t.id === id);
+    const task = await db.getTaskById(id);
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
     const now = new Date().toISOString();
+    const updates = { lastActionAt: now };
 
     if (currentStep !== undefined) {
-      task.currentStep = currentStep;
+      updates.currentStep = currentStep;
     }
 
     if (nextAction !== undefined) {
-      task.nextAction = nextAction;
+      updates.nextAction = nextAction;
     }
 
-    task.lastActionAt = now;
-    task.updatedAt = now;
-
-    await persistData();
-    res.json({ success: true, task });
+    const updatedTask = await db.updateTask(id, updates);
+    res.json({ success: true, task: updatedTask });
   } catch (err) {
     console.error('Task step update error:', err);
     res.status(500).json({ error: err.message });
@@ -1008,15 +971,11 @@ app.delete('/api/agents/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Try to find by id or name
-    const agentIdx = agentRegistry.findIndex(a => a.id === id || a.name === id);
-
-    if (agentIdx === -1) {
+    const deleted = await db.deleteAgent(id);
+    if (!deleted) {
       return res.status(404).json({ error: 'Agent not found' });
     }
 
-    const deleted = agentRegistry.splice(agentIdx, 1)[0];
-    await persistData();
     res.json({ success: true, agent: deleted });
   } catch (err) {
     console.error('Agent delete error:', err);
@@ -1028,14 +987,12 @@ app.delete('/api/agents/:id', async (req, res) => {
 app.delete('/api/tasks/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const taskIdx = tasks.findIndex(t => t.id === id);
 
-    if (taskIdx === -1) {
+    const deleted = await db.deleteTask(id);
+    if (!deleted) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    const deleted = tasks.splice(taskIdx, 1)[0];
-    await persistData();
     res.json({ success: true, task: deleted });
   } catch (err) {
     console.error('Task delete error:', err);
@@ -1059,10 +1016,7 @@ app.post('/api/webhook/wa-lead', async (req, res) => {
 
     // Dedup: check if task with same title exists in last 1 hour
     const taskTitle = `New lead: ${name}`;
-    const existing = tasks.find(t =>
-      t.title === taskTitle &&
-      t.createdAt > oneHourAgo
-    );
+    const existing = await db.findTaskByTitle(taskTitle, oneHourAgo);
 
     if (existing) {
       return res.json({ created: false, task: existing, message: 'Duplicate task detected' });
@@ -1108,14 +1062,8 @@ app.post('/api/webhook/wa-lead', async (req, res) => {
       originalPriority: null
     };
 
-    tasks.unshift(task);
-
-    if (tasks.length > 1000) {
-      tasks = tasks.slice(0, 1000);
-    }
-
-    await persistData();
-    res.json({ created: true, task });
+    const createdTask = await db.createTask(task);
+    res.json({ created: true, task: createdTask });
   } catch (err) {
     console.error('WA lead webhook error:', err);
     res.status(500).json({ error: err.message });
@@ -1136,10 +1084,7 @@ app.post('/api/webhook/oa-submission', async (req, res) => {
 
     // Dedup: check if task with same title exists in last 1 hour
     const taskTitle = `New submission: ${name}${county ? ` (${county})` : ''}`;
-    const existing = tasks.find(t =>
-      t.title === taskTitle &&
-      t.createdAt > oneHourAgo
-    );
+    const existing = await db.findTaskByTitle(taskTitle, oneHourAgo);
 
     if (existing) {
       return res.json({ created: false, task: existing, message: 'Duplicate task detected' });
@@ -1185,14 +1130,8 @@ app.post('/api/webhook/oa-submission', async (req, res) => {
       originalPriority: null
     };
 
-    tasks.unshift(task);
-
-    if (tasks.length > 1000) {
-      tasks = tasks.slice(0, 1000);
-    }
-
-    await persistData();
-    res.json({ created: true, task });
+    const createdTask = await db.createTask(task);
+    res.json({ created: true, task: createdTask });
   } catch (err) {
     console.error('OA submission webhook error:', err);
     res.status(500).json({ error: err.message });
@@ -1275,15 +1214,8 @@ app.post('/api/task', async (req, res) => {
       originalPriority: null
     };
 
-    tasks.unshift(task);
-
-    // Keep only last 1000 tasks
-    if (tasks.length > 1000) {
-      tasks = tasks.slice(0, 1000);
-    }
-
-    await persistData();
-    res.json({ success: true, task });
+    const createdTask = await db.createTask(task);
+    res.json({ success: true, task: createdTask });
   } catch (err) {
     console.error('Task creation error:', err);
     res.status(500).json({ error: err.message });
@@ -1296,7 +1228,7 @@ app.patch('/api/task/:id', async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
-    const task = tasks.find(t => t.id === id);
+    const task = await db.getTaskById(id);
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
@@ -1307,39 +1239,30 @@ app.patch('/api/task/:id', async (req, res) => {
     const statusChanged = updates.status && updates.status !== task.status;
     const slaChanged = updates.sla && updates.sla !== task.sla;
 
-    // Apply updates
-    Object.keys(updates).forEach(key => {
-      if (key !== 'id' && key !== 'createdAt') {
-        task[key] = updates[key];
-      }
-    });
-
-    task.updatedAt = now;
-
     // Auto-set lastActionAt when status changes
     if (statusChanged) {
-      task.lastActionAt = now;
+      updates.lastActionAt = now;
     }
 
     // Set completedAt if status changed to completed
     if (updates.status === 'completed' && !task.completedAt) {
-      task.completedAt = now;
+      updates.completedAt = now;
     }
 
     // Recalculate tier if estimatedValue changed
     if (updates.estimatedValue) {
-      task.tier = calculateTier(updates.estimatedValue);
+      updates.tier = calculateTier(updates.estimatedValue);
     }
 
     // Recalculate SLA deadline if sla changed
     if (slaChanged) {
-      task.slaDeadline = calculateSlaDeadline(task.sla, task.createdAt);
-      task.slaStatus = calculateSlaStatus(task.slaDeadline, task.createdAt, task.sla);
-      task.timeLeft = formatTimeLeft(task.slaDeadline, task.slaStatus);
+      updates.slaDeadline = calculateSlaDeadline(updates.sla, task.createdAt);
+      updates.slaStatus = calculateSlaStatus(updates.slaDeadline, task.createdAt, updates.sla);
+      updates.timeLeft = formatTimeLeft(updates.slaDeadline, updates.slaStatus);
     }
 
-    await persistData();
-    res.json({ success: true, task });
+    const updatedTask = await db.updateTask(id, updates);
+    res.json({ success: true, task: updatedTask });
   } catch (err) {
     console.error('Task update error:', err);
     res.status(500).json({ error: err.message });
@@ -1347,25 +1270,16 @@ app.patch('/api/task/:id', async (req, res) => {
 });
 
 // GET /api/tasks - List tasks with filters
-app.get('/api/tasks', (req, res) => {
+app.get('/api/tasks', async (req, res) => {
   try {
-    let filtered = tasks.filter(t => t.status !== 'archived');
+    const filters = {};
+    if (req.query.company) filters.company = req.query.company;
+    if (req.query.category) filters.category = req.query.category;
+    if (req.query.status) filters.status = req.query.status;
+    if (req.query.owner) filters.owner = req.query.owner;
 
-    // Apply filters
-    if (req.query.company) {
-      filtered = filtered.filter(t => t.company === req.query.company);
-    }
-    if (req.query.category) {
-      filtered = filtered.filter(t => t.category === req.query.category);
-    }
-    if (req.query.status) {
-      filtered = filtered.filter(t => t.status === req.query.status);
-    }
-    if (req.query.owner) {
-      filtered = filtered.filter(t => t.owner === req.query.owner);
-    }
-
-    res.json(filtered);
+    const tasks = await db.getAllTasks(filters);
+    res.json(tasks);
   } catch (err) {
     console.error('Task list error:', err);
     res.status(500).json({ error: err.message });
@@ -1376,17 +1290,14 @@ app.get('/api/tasks', (req, res) => {
 app.delete('/api/task/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const task = tasks.find(t => t.id === id);
+    const task = await db.getTaskById(id);
 
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    task.status = 'archived';
-    task.updatedAt = new Date().toISOString();
-
-    await persistData();
-    res.json({ success: true, task });
+    const archivedTask = await db.archiveTask(id);
+    res.json({ success: true, task: archivedTask });
   } catch (err) {
     console.error('Task delete error:', err);
     res.status(500).json({ error: err.message });
@@ -1406,44 +1317,44 @@ app.post('/api/daily-reset', async (req, res) => {
 
     let rolledCount = 0;
 
-    tasks.forEach(task => {
+    // Get tasks with TODAY or NOW SLA that are incomplete
+    const allTasks = await db.getAllTasks();
+
+    for (const task of allTasks) {
       // Only roll forward incomplete tasks with TODAY or NOW SLA
       if (['pending', 'in_progress', 'assigned'].includes(task.status) &&
           (task.sla === 'TODAY' || task.sla === 'NOW')) {
 
-        // Mark as rolled forward
-        task.rolledForward = true;
+        const updates = {
+          rolledForward: true,
+          sla: 'TODAY',
+          slaDeadline: tomorrowEod,
+          slaStatus: 'on_track',
+          timeLeft: formatTimeLeft(tomorrowEod, 'on_track'),
+          slaOverdueAt: null,
+          slaEscalatedAt: null
+        };
 
         // Boost priority
         if (!task.originalPriority) {
-          task.originalPriority = task.tier;
+          updates.originalPriority = task.tier;
         }
 
         if (task.tier === 'LOW') {
-          task.tier = 'MEDIUM';
+          updates.tier = 'MEDIUM';
         } else if (task.tier === 'MEDIUM') {
-          task.tier = 'HIGH';
+          updates.tier = 'HIGH';
         }
-
-        // Reset SLA to TODAY for tomorrow
-        task.sla = 'TODAY';
-        task.slaDeadline = tomorrowEod;
-        task.slaStatus = 'on_track';
-        task.timeLeft = formatTimeLeft(task.slaDeadline, 'on_track');
-
-        // Reset overdue timestamps
-        task.slaOverdueAt = null;
-        task.slaEscalatedAt = null;
 
         // Add note
         const rollNote = `[Rolled forward from ${now.toLocaleDateString('en-US', { timeZone: 'America/Chicago' })}]`;
-        task.detail = task.detail ? `${task.detail}\n${rollNote}` : rollNote;
+        updates.detail = task.detail ? `${task.detail}\n${rollNote}` : rollNote;
 
+        await db.updateTask(task.id, updates);
         rolledCount++;
       }
-    });
+    }
 
-    await persistData();
     res.json({ success: true, rolledCount, message: `${rolledCount} tasks rolled forward` });
   } catch (err) {
     console.error('Daily reset error:', err);
@@ -1634,10 +1545,10 @@ app.post('/api/creators/import', async (req, res) => {
 });
 
 // GET /api/creator-pipeline - Pipeline summary for dashboard
-app.get('/api/creator-pipeline', (req, res) => {
+app.get('/api/creator-pipeline', async (req, res) => {
   try {
     // Run follow-up automation
-    runCreatorFollowUp();
+    await runCreatorFollowUp();
 
     // Group by stage
     const stages = {
@@ -1686,16 +1597,17 @@ app.get('/api/creator-pipeline', (req, res) => {
 app.get('/api/dashboard', async (req, res) => {
   try {
     // Run SLA enforcement on every dashboard request
-    runSlaEnforcement();
+    await runSlaEnforcement();
 
-    const [oaData, waData, mpData, smsData, commsData] = await Promise.all([
+    const [oaData, waData, mpData, smsData, commsData, tasks] = await Promise.all([
       fetchOAData(),
       fetchWAData(),
       fetchMPData(),
       fetch('https://disciplined-alignment-production.up.railway.app/api/sms-status')
         .then(r => r.json()).catch(() => ({ status: 'UNKNOWN', successRate: 'N/A' })),
       fetch('https://disciplined-alignment-production.up.railway.app/api/comms-status')
-        .then(r => r.json()).catch(() => ({ rates: {}, stats: {}, noReply24h: 0 }))
+        .then(r => r.json()).catch(() => ({ rates: {}, stats: {}, noReply24h: 0 })),
+      db.getAllTasks()
     ]);
 
     const now = Date.now();
@@ -1998,10 +1910,7 @@ app.post('/api/activity', async (req, res) => {
         originalPriority: null
       };
 
-      tasks.unshift(task);
-      if (tasks.length > 1000) {
-        tasks = tasks.slice(0, 1000);
-      }
+      await db.createTask(task);
     }
 
     await persistData();
@@ -2066,13 +1975,10 @@ app.post('/api/approval', async (req, res) => {
       originalPriority: null
     };
 
-    tasks.unshift(task);
-    if (tasks.length > 1000) {
-      tasks = tasks.slice(0, 1000);
-    }
+    const created = await db.createTask(task);
 
     await persistData();
-    res.json({ success: true, approval: task });
+    res.json({ success: true, approval: created });
   } catch (err) {
     console.error('Approval creation error:', err);
     res.status(500).json({ error: err.message });
@@ -2085,27 +1991,28 @@ app.patch('/api/approval/:id', async (req, res) => {
     const { id } = req.params;
     const { action, reason } = req.body;
 
-    const task = tasks.find(t => t.id === id);
+    const task = await db.getTaskById(id);
     if (!task) {
       return res.status(404).json({ error: 'Approval not found' });
     }
 
     const now = new Date().toISOString();
+    const updates = { updatedAt: now };
 
     if (action === 'approve') {
-      task.status = 'completed';
-      task.completedAt = now;
-      task.lastActionAt = now;
+      updates.status = 'completed';
+      updates.completedAt = now;
+      updates.lastActionAt = now;
     } else if (action === 'reject') {
-      task.status = 'archived';
-      task.detail = `${task.detail}\n[REJECTED: ${reason || 'No reason provided'}]`.trim();
-      task.lastActionAt = now;
+      updates.status = 'archived';
+      updates.detail = `${task.detail}\n[REJECTED: ${reason || 'No reason provided'}]`.trim();
+      updates.lastActionAt = now;
     }
 
-    task.updatedAt = now;
+    const updated = await db.updateTask(id, updates);
 
     await persistData();
-    res.json({ success: true, approval: task });
+    res.json({ success: true, approval: updated });
   } catch (err) {
     console.error('Approval update error:', err);
     res.status(500).json({ error: err.message });
@@ -2162,13 +2069,10 @@ app.post('/api/blocker', async (req, res) => {
       originalPriority: null
     };
 
-    tasks.unshift(task);
-    if (tasks.length > 1000) {
-      tasks = tasks.slice(0, 1000);
-    }
+    const created = await db.createTask(task);
 
     await persistData();
-    res.json({ success: true, blocker: task });
+    res.json({ success: true, blocker: created });
   } catch (err) {
     console.error('Blocker creation error:', err);
     res.status(500).json({ error: err.message });
@@ -2180,11 +2084,12 @@ app.post('/api/reset', async (req, res) => {
   try {
     const { target } = req.body || {};
     if (target === 'all') {
-      tasks.length = 0;
+      // Note: tasks/agents in Supabase — reset would require DELETE FROM mc_tasks/mc_agents
+      // For safety, only clear local data (creators/activity)
       activityLog.length = 0;
       creators.length = 0;
       await persistData();
-      return res.json({ success: true, message: 'All data cleared' });
+      return res.json({ success: true, message: 'Local data cleared (tasks/agents in Supabase — use SQL to reset)' });
     }
     if (target === 'creators') {
       creators.length = 0;
@@ -2201,81 +2106,87 @@ app.post('/api/reset', async (req, res) => {
 // ========== HEALTH & STATIC ==========
 
 // GET /api/agents — Agent status for dashboard visibility
-app.get('/api/agents', (req, res) => {
-  // Agent registry — updated via POST /api/agent-heartbeat or manually
-  res.json(agentRegistry || []);
-});
-
-// POST /api/agent-heartbeat — Agents report their status
-app.post('/api/agent-heartbeat', (req, res) => {
-  const { name, status, task, type, lastSeen } = req.body;
-  if (!name) return res.status(400).json({ error: 'name required' });
-  
-  const idx = agentRegistry.findIndex(a => a.name === name);
-  const agent = {
-    name,
-    status: status || 'active',
-    task: task || '',
-    type: type || 'background',
-    lastSeen: lastSeen || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  
-  if (idx >= 0) {
-    agentRegistry[idx] = { ...agentRegistry[idx], ...agent };
-  } else {
-    agentRegistry.push(agent);
+app.get('/api/agents', async (req, res) => {
+  try {
+    const agents = await db.getAllAgents();
+    res.json(agents);
+  } catch (err) {
+    console.error('Agent list error:', err);
+    res.status(500).json({ error: err.message });
   }
-  
-  res.json({ ok: true, agent: agentRegistry[idx >= 0 ? idx : agentRegistry.length - 1] });
 });
 
-app.get('/api/health', (req, res) => {
-  const now = Date.now();
-  const uptimeSec = Math.floor((now - startTime) / 1000);
-
-  // Calculate agent stats
-  const agentStats = {
-    total: agentRegistry.length,
-    working: agentRegistry.filter(a => a.status === 'working').length,
-    idle: agentRegistry.filter(a => a.status === 'idle').length,
-    stale: agentRegistry.filter(a => {
-      const lastHeartbeat = a.lastHeartbeat ? new Date(a.lastHeartbeat).getTime() : 0;
-      const staleSec = Math.floor((now - lastHeartbeat) / 1000);
-      return staleSec > 120;
-    }).length
-  };
-
-  // Calculate task stats
-  const taskStats = {
-    total: tasks.filter(t => t.status !== 'archived').length,
-    queued: tasks.filter(t => t.status === 'queued').length,
-    inProgress: tasks.filter(t => t.status === 'in_progress').length,
-    completed: tasks.filter(t => t.status === 'completed').length
-  };
-
-  res.json({
-    ok: true,
-    uptimeSec,
-    agents: agentStats,
-    tasks: taskStats
-  });
+// POST /api/agent-heartbeat — Agents report their status (legacy endpoint)
+app.post('/api/agent-heartbeat', async (req, res) => {
+  try {
+    const { name, status, task, type, lastSeen } = req.body;
+    if (!name) return res.status(400).json({ error: 'name required' });
+    
+    const existing = await db.getAgentByName(name);
+    const now = new Date().toISOString();
+    
+    const agent = {
+      id: existing ? existing.id : `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name,
+      status: status || 'active',
+      task: task || '',
+      type: type || 'background',
+      lastHeartbeat: lastSeen || now,
+      updatedAt: now,
+      company: existing ? existing.company : null,
+      description: existing ? existing.description : '',
+      capabilities: existing ? existing.capabilities : [],
+      createdAt: existing ? existing.createdAt : now
+    };
+    
+    const result = await db.upsertAgent(agent);
+    res.json({ ok: true, agent: result });
+  } catch (err) {
+    console.error('Agent heartbeat error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get('/health', (req, res) => {
-  const now = Date.now();
-  const uptimeSec = Math.floor((now - startTime) / 1000);
+app.get('/api/health', async (req, res) => {
+  try {
+    const now = Date.now();
+    const uptimeSec = Math.floor((now - startTime) / 1000);
+    const health = await db.healthCheck();
+    
+    res.json({
+      ok: true,
+      uptimeSec,
+      storage: 'supabase',
+      agents: health.agents,
+      tasks: health.tasks
+    });
+  } catch (err) {
+    console.error('Health check error:', err);
+    res.json({
+      ok: false,
+      error: err.message,
+      uptimeSec: Math.floor((Date.now() - startTime) / 1000)
+    });
+  }
+});
 
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptimeSec,
-    taskCount: tasks.filter(t => t.status !== 'archived').length,
-    needsApproval: tasks.filter(t => t.status === 'needs_approval').length,
-    blocked: tasks.filter(t => t.status === 'blocked').length,
-    overdue: tasks.filter(t => t.slaStatus === 'overdue' || t.slaStatus === 'escalated').length,
-    agentCount: agentRegistry.length
-  });
+app.get('/health', async (req, res) => {
+  try {
+    const now = Date.now();
+    const uptimeSec = Math.floor((now - startTime) / 1000);
+    const health = await db.healthCheck();
+    
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptimeSec,
+      storage: 'supabase',
+      taskCount: health.tasks.total,
+      agentCount: health.agents.total
+    });
+  } catch (err) {
+    res.json({ status: 'error', error: err.message });
+  }
 });
 
 // ── Creator Reply Tracking ──
@@ -2344,11 +2255,17 @@ app.get('/', (req, res) => {
 });
 
 // Start server
-initDataStore().then(() => {
+initDataStore().then(async () => {
+  // Verify Supabase connection
+  try {
+    const health = await db.healthCheck();
+    console.log(`📦 Supabase MC: ${health.agents.total} agents, ${health.tasks.total} tasks`);
+  } catch (err) {
+    console.error('⚠️ Supabase connection failed:', err.message);
+    console.error('Falling back may not work — check SUPABASE_URL and key');
+  }
+  
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Mission Control V3 (Daily Operating System) running on port ${PORT}`);
-    console.log(`📋 Tasks: ${tasks.filter(t => t.status !== 'archived').length}`);
-    console.log(`🔴 Needs Approval: ${tasks.filter(t => t.status === 'needs_approval').length}`);
-    console.log(`🚨 Blockers: ${tasks.filter(t => t.status === 'blocked').length}`);
+    console.log(`🚀 Mission Control V3 (Supabase-backed) running on port ${PORT}`);
   });
 });
